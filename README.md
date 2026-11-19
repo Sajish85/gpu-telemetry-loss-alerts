@@ -4,7 +4,7 @@ Three Prometheus alert rules that fire when GPU telemetry stops arriving. They c
 
 > **Testing disclosure:** validated with promtool unit and mutation tests on synthetic series; metric names checked against the exporter's default counters; not run against a live exporter or GPU.
 
-Status: v1.0, published 19 November 2026. Author: Sajish Krishnan.
+Status: v1.0, published 19 November 2026. Zenodo DOI: https://doi.org/10.5281/zenodo.24360181. Author: Sajish Krishnan.
 
 ## Why these exist
 
