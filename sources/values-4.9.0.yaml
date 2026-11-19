@@ -1,0 +1,403 @@
+# Copyright (c) 2020, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+image:
+  repository: nvcr.io/nvidia/k8s/dcgm-exporter
+  pullPolicy: IfNotPresent
+  # The exporter version. Each release also publishes the same image as
+  # <DCGM version>-<exporter version>-distroless. Leave tag empty to use the
+  # chart's appVersion.
+  tag: 4.9.0
+  # Optional digest pin. When set, the chart renders repository@digest and
+  # ignores tag for the image reference.
+  digest: ""
+
+# Extra dcgm-exporter command line arguments, for flags with no `config` key.
+# Example: ["-n"] removes the hostname label. Flags and extraEnv override
+# `config`, as the exporter applies them over its config file; prefer `config`
+# for settings it has a key for. While the chart renders `config`, it rejects
+# flags and extraEnv for settings its objects or checks use: the listen
+# address, metrics file, web config file, debug dump enabled and directory, and
+# the pod label, pod UID and DRA switches.
+arguments: []
+# To turn on pprof, set config.server.profiling=true and enable
+# tlsServerConfig or basicAuth; profiling needs a web config with TLS or
+# basic auth.
+
+# The exporter's config file, rendered into a ConfigMap. Change one key with
+# --set, for example --set config.sources.dcgm.watch.max_keep_age=5m; a list
+# such as `metrics` is replaced whole. The listen port must equal service.port.
+config:
+  version: 2
+  metrics:
+    - name: default
+      # The chart's metrics list (customMetrics, or the default list), mounted
+      # from the <fullname>-metrics ConfigMap.
+      file: /etc/dcgm-exporter/chart/metrics/default-counters.csv
+      every: 30s
+      enrichment:
+        kubernetes: auto    # pod, namespace and container names
+        container: false
+        dra: false
+        hpc_jobs: false
+  outputs:
+    prometheus:
+      type: prometheus
+      schema: dcgm/v1
+      listen: ":9400"      # port must equal service.port
+  sources:
+    dcgm:
+      # hostengine: host123:5555  # a running DCGM host engine (tcp://, unix://, vsock://); omit for embedded
+      watch:
+        max_keep_age: 10m
+        max_keep_samples: 0
+    # kubernetes:           # needs the RBAC from kubernetes.rbac.create
+    #   pod_uid: false
+    #   pod_labels:
+    #     enabled: false
+    #     allow: []         # RE2 patterns, required when enabled; [".*"] keeps every label
+    # dra:
+    #   mode: kubernetes    # with metrics[0].enrichment.dra: true
+  server:
+    max_concurrent_scrapes: 16
+    # read_timeout: 10s     # time to read a scrape request
+    # write_timeout: 30s    # time to build and write a scrape response; keep above serviceMonitor.scrapeTimeout
+  observability:
+    metrics:
+      enabled: false
+  # debug_dump:            # the chart mounts an emptyDir sized by debugDump.sizeLimit
+  #   enabled: false
+  #   directory: /tmp/dcgm-exporter-debug
+  #   retention: 24h
+  #   compression: true
+
+# Where the exporter configuration file comes from. The chart creates a
+# ConfigMap named <fullname>-config from `config` unless existingName is set
+# or `config` is null. The chart mounts the `key` file in the directory
+# /etc/dcgm-exporter/chart/config and sets DCGM_EXPORTER_CONFIG_FILE to it.
+# Every chart-owned config file (the exporter config, the metrics list and the
+# web config) is under /etc/dcgm-exporter/chart/, which the image does not use;
+# TLS certificates mount at /etc/dcgm-exporter/tls.
+configMap:
+  # Mount a ConfigMap that already exists instead of creating one. Its `key` must
+  # hold a complete exporter configuration file; `config` is not used. The exporter
+  # reads this file only at startup, so restart the pods after editing it. In the
+  # file, point metrics[].file at /etc/dcgm-exporter/chart/metrics/default-counters.csv
+  # to use the chart's metrics list.
+  existingName: ""
+  # Key inside the ConfigMap that holds the config file.
+  key: config.yaml
+
+# Image pull secrets for container images
+imagePullSecrets: []
+
+# Overrides the chart's name
+nameOverride: ""
+
+# Overrides the chart's computed fullname
+fullnameOverride: ""
+
+# Overrides the deployment namespace
+namespaceOverride: ""
+
+# hostPID allows the DCGM-Exporter container to see processes on the host node
+# Default: false
+hostPID: false
+
+# Use a Kubernetes RuntimeClass when the default runtime does not inject the
+# NVIDIA driver. Example: nvidia. Leave empty when the default runtime already
+# provides NVIDIA support.
+runtimeClassName: ""
+
+# Defines the priority class that will be used by the pod
+priorityClassName: "system-node-critical"
+
+# Enable or disable host network
+hostNetwork: false
+
+# Defines serviceAccount names for components.
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name:
+
+  # Whether to mount the SA token on the DaemonSet pod and the ServiceAccount.
+  # If not set, mounted when kubernetes.rbac.create is true and pod labels, pod UID or DRA is on.
+  # With RBAC you manage yourself, set it to true.
+  # Setting this to false disables in-cluster Kubernetes API authentication for those features.
+  automountServiceAccountToken:
+
+# Exactly one of maxUnavailable and maxSurge must be nonzero: Kubernetes rejects
+# a DaemonSet with both set above 0 or both at 0, and so does the chart.
+rollingUpdate:
+  # Specifies maximum number of DaemonSet pods that can be unavailable during the update
+  maxUnavailable: 1
+  # Specifies maximum number of nodes with an existing available DaemonSet pod that can have an updated DaemonSet pod during an update
+  maxSurge: 0
+
+# Labels to be added to dcgm-exporter pods
+podLabels: {}
+
+# Annotations to be added to the dcgm-exporter DaemonSet
+daemonSetAnnotations: {}
+
+# Annotations to be added to dcgm-exporter pods
+podAnnotations: {}
+# Using this annotation which is required for prometheus scraping
+  # prometheus.io/scrape: "true"
+  # prometheus.io/port: "9400"
+
+# The SecurityContext for the dcgm-exporter pods
+podSecurityContext: {}
+  # fsGroup: 2000
+
+# The SecurityContext for the dcgm-exporter containers
+securityContext:
+  runAsNonRoot: false
+  runAsUser: 0
+  capabilities:
+    add: ["SYS_ADMIN"]  # Required for profiling metrics (DCGM_FI_PROF_*)
+    drop: ["ALL"]
+  allowPrivilegeEscalation: false
+  # readOnlyRootFilesystem: true  # Enable if tmpfs volumes are configured
+  # Note: For non-root without profiling metrics, use:
+  # runAsNonRoot: true, runAsUser: 1000, and remove SYS_ADMIN from capabilities.add
+
+# Defines the dcgm-exporter service
+service:
+  # When enabled, the helm chart will create service
+  enable: true
+  type: ClusterIP
+  # Accepts either "Cluster" or "Local", choose Local if you want to route internal traffic within the node only
+  internalTrafficPolicy: Cluster
+  clusterIP: ""
+  # Service, container and probe port; config.outputs.<name>.listen must use it.
+  port: 9400
+  # Annotations to add to the service
+  annotations: {}
+
+# Allows to control pod resources
+resources:
+  limits:
+    cpu: 200m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+    ephemeral-storage: 100Mi
+serviceMonitor:
+  apiVersion: "monitoring.coreos.com/v1"
+  enabled: true
+  interval: 30s
+  # Keep below config.server.write_timeout (default 30s) and no greater than interval.
+  scrapeTimeout: 25s
+  honorLabels: false
+  additionalLabels: {}
+    #monitoring: prometheus
+  relabelings: []
+    # - sourceLabels: [__meta_kubernetes_pod_node_name]
+    #   separator: ;
+    #   regex: ^(.*)$
+    #   targetLabel: nodename
+    #   replacement: $1
+    #   action: replace
+  metricRelabelings: []
+    # - action: replace
+    #   regex: original_metrics_name 
+    #   replacement: new_metrics_name
+    #   sourceLabels:
+    #   - name
+    #   targetLabel: __name__
+
+nodeSelector: {}
+  #node: gpu
+
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+#- operator: Exists
+
+affinity: {}
+  #nodeAffinity:
+  #  requiredDuringSchedulingIgnoredDuringExecution:
+  #    nodeSelectorTerms:
+  #    - matchExpressions:
+  #      - key: nvidia-gpu
+  #        operator: Exists
+
+extraHostVolumes: []
+#- name: host-binaries
+#  hostPath: /opt/bin
+
+# Your own ConfigMap volumes and container mounts. The chart mounts its config,
+# metrics list and web config itself, so leave these empty unless you add files.
+# Mounting at /etc/dcgm-exporter/default-counters.csv fails the render while the
+# chart renders `config` and no config.metrics[].file names that path (the default
+# does not): list the metrics in config.metrics[].fields instead, or point
+# config.metrics[].file at your own file.
+extraConfigMapVolumes: []
+#- name: extra-metrics
+#  configMap:
+#    name: my-metrics
+#
+extraVolumeMounts: []
+#- name: extra-metrics
+#  mountPath: /etc/dcgm-exporter/extra
+#  readOnly: true
+
+extraEnv: []
+
+# Extra init containers for the pod, as full Kubernetes container specs.
+initContainers: []
+
+# Path to the kubelet socket for /pod-resources
+kubeletPath: "/var/lib/kubelet/pod-resources"
+
+# HTTPS configuration. With TLS or basic auth on, the chart renders a web config
+# file, mounts it at /etc/dcgm-exporter/chart/web-config/web-config.yaml and sets
+# config.server.web_config_file to it; with configMap.existingName, set
+# server.web_config_file to that path in your file (or pass --web-config-file
+# with that path for a version 1 file).
+tlsServerConfig:
+  # Enable or disable HTTPS configuration
+  enabled: false
+  # Use autogenerated self-signed TLS certificates. Not recommended for production environments.
+  autoGenerated: true
+  # Existing secret containing your own server key and certificate
+  existingSecret: ""
+  # Certificate file name
+  certFilename: "tls.crt"
+  # Key file name
+  keyFilename: "tls.key"
+  # CA certificate file name
+  caFilename: "ca.crt"
+  # Server policy for client authentication. Maps to ClientAuth Policies.
+  # For more detail on clientAuth options:
+  # https://golang.org/pkg/crypto/tls/#ClientAuthType
+  #
+  # NOTE: To make client certificates mandatory, use RequireAndVerifyClientCert.
+  # VerifyClientCertIfGiven verifies a certificate only when the client sends one,
+  # so clients without one still connect. RequestClientCert and
+  # RequireAnyClientCert do not verify certificates.
+  clientAuthType: ""
+  # TLS Key for HTTPS - ignored if existingSecret is provided
+  key: ""
+  # TLS Certificate for HTTPS - ignored if existingSecret is provided
+  cert: ""
+  # CA Certificate for HTTPS - ignored if existingSecret is provided
+  ca: ""
+
+basicAuth:
+  # Object containing <user>:<password> key-value pairs for each user that will have access via basic authentication.
+  # The chart hashes these passwords in the generated web-config Secret. Treat Helm values and release data as sensitive.
+  users: {}
+
+# Kubernetes integration settings. Pod labels, pod UID and DRA labels are set in
+# `config`: sources.kubernetes.pod_labels, sources.kubernetes.pod_uid, and
+# metrics[0].enrichment.dra with sources.dra.mode: kubernetes.
+kubernetes:
+  # RBAC settings for Kubernetes integration
+  rbac:
+    # Create a ClusterRole and binding when `config` turns on pod labels, pod UID or
+    # DRA labels: Pods get/list/watch, plus ResourceSlices for DRA. With
+    # configMap.existingName the chart cannot read the file and creates none. Set
+    # false to manage them yourself, and set serviceAccount.automountServiceAccountToken
+    # when the exporter needs a token.
+    create: true
+
+# Storage for runtime object debug dumps. Turn dumps on with
+# config.debug_dump.enabled; config.debug_dump holds the directory, retention,
+# compression and size and count limits. When dumps are on, the chart mounts an
+# emptyDir at the dump directory unless values supply a volume named debug-dumps.
+debugDump:
+  # Size limit of the chart's dump emptyDir. Keep it above
+  # config.debug_dump.max_total_bytes (256MiB by default).
+  sizeLimit: 512Mi
+
+
+# customMetrics is deprecated: list the metrics in config.metrics[].fields instead of setting `file`.
+# Helm replaces the whole metrics list, so repeat the rest of the entry:
+#   config:
+#     metrics:
+#       - name: default
+#         fields:
+#           - {name: DCGM_FI_DEV_GPU_TEMP_CELSIUS, prometheus_type: gauge, help: GPU temperature (in C).}
+#           - {name: DCGM_FI_DEV_BOARD_POWER_WATTS, prometheus_type: gauge, help: Power draw (in W).}
+#         every: 30s
+#         enrichment:
+#           kubernetes: auto
+#           container: false
+#           dra: false
+#           hpc_jobs: false
+#
+# Customized list of metrics to emit. Expected to be in the same format (CSV) as the default list.
+# Must be the complete list and is not additive. If unset, the default list will take effect.
+# The chart mounts it at /etc/dcgm-exporter/chart/metrics/default-counters.csv. The
+# exporter reads it only when its metrics file setting names that path:
+#   - with the chart's `config`: a config.metrics[].file must name it (the default
+#     does); otherwise the render fails.
+#   - with configMap.existingName or `config: null`: set metrics[].file in your
+#     config file, or pass -f, with that path. The chart cannot check this; its
+#     install notes name the path.
+# Running pods reload an edited list without a restart.
+# customMetrics: |
+#   # DCGM field, Prometheus type, help text
+#   DCGM_FI_DEV_GPU_TEMP_CELSIUS, gauge, GPU temperature (in C).
+#   DCGM_FI_DEV_BOARD_POWER_WATTS, gauge, Power draw (in W).
+
+# The startup probe gives a slow start, such as a large metric file on a node
+# with many GPUs, up to periodSeconds x failureThreshold (5 minutes) to begin
+# serving. The liveness and readiness probes start only after it succeeds, so
+# they need no initial delay. With the startup probe disabled they wait 45
+# seconds unless initialDelaySeconds is set.
+startupProbe:
+  enabled: true
+  periodSeconds: 5
+  failureThreshold: 60
+  # timeoutSeconds uses the Kubernetes default when omitted.
+  # timeoutSeconds: 1
+
+livenessProbe:
+  # initialDelaySeconds: 0
+  periodSeconds: 5
+  # timeoutSeconds and failureThreshold use the Kubernetes defaults when omitted.
+  # timeoutSeconds: 1
+  # failureThreshold: 3
+
+# Readiness probe settings left out use the Kubernetes defaults. To set one,
+# replace {} with a mapping, for example:
+readinessProbe: {}
+  # initialDelaySeconds: 0
+  # periodSeconds: 10
+  # timeoutSeconds: 1
+  # failureThreshold: 3
+
+# NetworkPolicy that admits only allowedPeers to the metrics TCP port. Needs a CNI
+# that enforces NetworkPolicy; the chart rejects it with hostNetwork: true.
+networkPolicy:
+  enabled: false
+  # NetworkPolicy peers. [] denies all ingress; a peer {} admits every source.
+  allowedPeers: []
+  # For example:
+  # - namespaceSelector:
+  #     matchLabels:
+  #       kubernetes.io/metadata.name: monitoring
+  #   podSelector:
+  #     matchLabels:
+  #       app.kubernetes.io/name: prometheus

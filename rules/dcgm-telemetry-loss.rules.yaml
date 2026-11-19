@@ -1,0 +1,35 @@
+# dcgm-exporter 4.9.0+ metric names. Ported from original/rules.yaml; see METRIC-NAMES.md.
+groups:
+- name: dcgm-exporter.telemetry
+  rules:
+  - alert: DCGMExporterDown
+    expr: up{job="dcgm-exporter", namespace="gpu-monitoring"} == 0
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: DCGM exporter target is down
+      description: No GPU telemetry is being scraped from {{ $labels.instance }} (job
+        dcgm-exporter, namespace gpu-monitoring). GPU faults, throttling and utilization
+        on that node are not visible while this fires.
+  - alert: DCGMExporterTargetsMissing
+    expr: absent(up{job="dcgm-exporter", namespace="gpu-monitoring"})
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: No DCGM exporter targets are being scraped
+      description: Prometheus has no scrape target for job dcgm-exporter in namespace
+        gpu-monitoring. The exporter DaemonSet or its ServiceMonitor may be missing,
+        so no GPU telemetry is collected.
+  - alert: DCGMExporterNoGPUMetrics
+    expr: up{job="dcgm-exporter", namespace="gpu-monitoring"} == 1 unless on (instance)
+      DCGM_FI_DEV_GPU_UTIL_RATIO{job="dcgm-exporter", namespace="gpu-monitoring"}
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: DCGM exporter is up but serves no GPU metrics
+      description: '{{ $labels.instance }} is scraped successfully but exports no
+        DCGM_FI_DEV_GPU_UTIL_RATIO series. DCGM collection may have stopped while the exporter
+        HTTP endpoint stays healthy.'

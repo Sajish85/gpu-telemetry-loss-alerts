@@ -1,0 +1,156 @@
+# promtool unit tests for the chart's PrometheusRule, rendered by run.sh with
+# release "dcgm-exporter" in namespace "gpu-monitoring". All series are
+# synthetic: no GPU, no exporter, no Prometheus server.
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # Two healthy exporters: nothing fires.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="dcgm-exporter", namespace="gpu-monitoring", instance="10.0.0.1:9400"}'
+        values: '1x20'
+      - series: 'up{job="dcgm-exporter", namespace="gpu-monitoring", instance="10.0.0.2:9400"}'
+        values: '1x20'
+      - series: 'DCGM_FI_DEV_GPU_UTIL{job="dcgm-exporter", namespace="gpu-monitoring", instance="10.0.0.1:9400", gpu="0"}'
+        values: '35x20'
+      - series: 'DCGM_FI_DEV_GPU_UTIL{job="dcgm-exporter", namespace="gpu-monitoring", instance="10.0.0.2:9400", gpu="0"}'
+        values: '80x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: DCGMExporterDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: DCGMExporterTargetsMissing
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: DCGMExporterNoGPUMetrics
+        exp_alerts: []
+
+  # One exporter target down: pending before `for`, firing after, only for that instance.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="dcgm-exporter", namespace="gpu-monitoring", instance="10.0.0.1:9400"}'
+        values: '0x20'
+      - series: 'up{job="dcgm-exporter", namespace="gpu-monitoring", instance="10.0.0.2:9400"}'
+        values: '1x20'
+      - series: 'DCGM_FI_DEV_GPU_UTIL{job="dcgm-exporter", namespace="gpu-monitoring", instance="10.0.0.2:9400", gpu="0"}'
+        values: '80x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: DCGMExporterDown
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: DCGMExporterDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: dcgm-exporter
+              namespace: gpu-monitoring
+              instance: 10.0.0.1:9400
+            exp_annotations:
+              summary: DCGM exporter target is down
+              description: >-
+                No GPU telemetry is being scraped from 10.0.0.1:9400 (job dcgm-exporter, namespace gpu-monitoring).
+                GPU faults, throttling and utilization on that node are not visible while this fires.
+      # A down target is not also reported as "up but no metrics".
+      - eval_time: 6m
+        alertname: DCGMExporterNoGPUMetrics
+        exp_alerts: []
+
+  # No exporter targets at all (DaemonSet or ServiceMonitor gone).
+  - interval: 1m
+    input_series:
+      - series: 'up{job="some-other-job", namespace="gpu-monitoring", instance="10.0.0.9:8080"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: DCGMExporterTargetsMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: dcgm-exporter
+              namespace: gpu-monitoring
+            exp_annotations:
+              summary: No DCGM exporter targets are being scraped
+              description: >-
+                Prometheus has no scrape target for job dcgm-exporter in namespace gpu-monitoring.
+                The exporter DaemonSet or its ServiceMonitor may be missing, so no GPU telemetry is collected.
+
+  # Exporter scraped fine (/health and /metrics answer) but serves no DCGM series:
+  # the "up but empty" case that an up == 0 alert cannot see.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="dcgm-exporter", namespace="gpu-monitoring", instance="10.0.0.1:9400"}'
+        values: '1x20'
+      - series: 'up{job="dcgm-exporter", namespace="gpu-monitoring", instance="10.0.0.2:9400"}'
+        values: '1x20'
+      - series: 'DCGM_FI_DEV_GPU_UTIL{job="dcgm-exporter", namespace="gpu-monitoring", instance="10.0.0.1:9400", gpu="0"}'
+        values: '35x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: DCGMExporterNoGPUMetrics
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: dcgm-exporter
+              namespace: gpu-monitoring
+              instance: 10.0.0.2:9400
+            exp_annotations:
+              summary: DCGM exporter is up but serves no GPU metrics
+              description: >-
+                10.0.0.2:9400 is scraped successfully but exports no DCGM_FI_DEV_GPU_UTIL series.
+                DCGM collection may have stopped while the exporter HTTP endpoint stays healthy.
+      - eval_time: 6m
+        alertname: DCGMExporterDown
+        exp_alerts: []
+
+  # Metrics stop mid-run while the target stays up (stale after 5m without samples).
+  - interval: 1m
+    input_series:
+      - series: 'up{job="dcgm-exporter", namespace="gpu-monitoring", instance="10.0.0.1:9400"}'
+        values: '1x30'
+      - series: 'DCGM_FI_DEV_GPU_UTIL{job="dcgm-exporter", namespace="gpu-monitoring", instance="10.0.0.1:9400", gpu="0"}'
+        values: '50x5 stale'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: DCGMExporterNoGPUMetrics
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: DCGMExporterNoGPUMetrics
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: dcgm-exporter
+              namespace: gpu-monitoring
+              instance: 10.0.0.1:9400
+            exp_annotations:
+              summary: DCGM exporter is up but serves no GPU metrics
+              description: >-
+                10.0.0.1:9400 is scraped successfully but exports no DCGM_FI_DEV_GPU_UTIL series.
+                DCGM collection may have stopped while the exporter HTTP endpoint stays healthy.
+
+  # A short blackout like krkn Scenario C (one exporter pod replaced within ~1m):
+  # shorter than `for`, so nothing pages. This is why the krkn detection check is a warning.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="dcgm-exporter", namespace="gpu-monitoring", instance="10.0.0.1:9400"}'
+        values: '1x5 0 stale'
+      - series: 'up{job="dcgm-exporter", namespace="gpu-monitoring", instance="10.0.0.7:9400"}'
+        values: '_x7 1x13'
+      - series: 'DCGM_FI_DEV_GPU_UTIL{job="dcgm-exporter", namespace="gpu-monitoring", instance="10.0.0.1:9400", gpu="0"}'
+        values: '40x5 stale'
+      - series: 'DCGM_FI_DEV_GPU_UTIL{job="dcgm-exporter", namespace="gpu-monitoring", instance="10.0.0.7:9400", gpu="0"}'
+        values: '_x7 40x13'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: DCGMExporterDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: DCGMExporterTargetsMissing
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: DCGMExporterNoGPUMetrics
+        exp_alerts: []
