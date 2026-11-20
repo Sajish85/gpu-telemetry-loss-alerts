@@ -115,3 +115,17 @@ All four are caught (TEST-OUTPUTS.md). The original mutant files from the earlie
 **CC BY 4.0** (Creative Commons Attribution 4.0 International, https://creativecommons.org/licenses/by/4.0/). It covers the files written for this project: the rules, tests, scripts, Makefile, `awesome-pr/` and the docs. This matches the licence of rule content in awesome-prometheus-alerts, whose LICENSE file puts "Alert rules and content (_data/rules.yml, dist/rules/, README.md)" under CC BY 4.0.
 
 Files in `sources/` are unmodified copies of upstream files kept for checking, and they stay under their own licences. The NVIDIA dcgm-exporter files are Apache-2.0. The awesome-prometheus-alerts snapshots fall under that repo's dual licence (see its LICENSE file).
+
+## How to cite
+
+```bibtex
+@misc{krishnan2026telemetryloss,
+  author       = {Krishnan, Sajish},
+  title        = {{GPU} Telemetry-Loss Alert Pack for {NVIDIA} dcgm-exporter},
+  year         = {2026},
+  publisher    = {Zenodo},
+  doi          = {10.5281/zenodo.24360181},
+  url          = {https://github.com/Sajish85/gpu-telemetry-loss-alerts},
+  note         = {ORCID: 0009-0009-7561-9290. Licence: CC BY 4.0}
+}
+```
